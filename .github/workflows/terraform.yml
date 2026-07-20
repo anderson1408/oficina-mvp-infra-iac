@@ -1,27 +1,29 @@
 name: "Terraform Infrastructure CI/CD"
 
+# 1. GATILHOS: Dispara no PR (para testar) e no Push para a main (para aplicar)
 on:
-  push:
+  pull_request:
     branches:
       - main
-  pull_request:
+  push:
     branches:
       - main
 
 permissions:
   contents: read
+  pull-requests: write # Permite interagir com PRs se necessário
 
 jobs:
   terraform:
-    name: "Terraform Automation"
+    name: "Terraform Pipeline"
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Faz o checkout do código no runner do GitHub
-      - name: Checkout Repository
+      # Step 1: Baixa o código do repositório no runner do GitHub
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Configura as credenciais da AWS injetando o AWS_SESSION_TOKEN do Lab
+      # Step 2: Injeta as credenciais temporárias do AWS Lab (VocLabs)
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,25 +32,33 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.AWS_DEFAULT_REGION }}
 
-      # 3. Instala a CLI do Terraform no runner
+      # Step 3: Instala o Terraform na máquina do GitHub Actions
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.5.0
 
-      # 4. Inicializa o Terraform (Conecta no Bucket S3 remoto que você criou)
+      # Step 4: Inicializa o Terraform (Conecta no seu Backend S3 remoto)
       - name: Terraform Init
         run: terraform init
 
-      # 5. Valida a sintaxe dos arquivos .tf
+      # Step 5: Verifica a formatação do código
+      - name: Terraform Format Check
+        run: terraform fmt -check
+
+      # Step 6: Valida a sintaxe dos arquivos .tf
       - name: Terraform Validate
         run: terraform validate
 
-      # 6. Executa o Plan (Mostra o que será alterado no PR)
+      # Step 7: Executa o PLAN (Roda TANTO no PR quanto na Main para simular)
       - name: Terraform Plan
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_DEFAULT_REGION }}
         run: terraform plan -input=false
 
-      # 7. Executa o Apply APENAS quando o PR for aprovado e mergeado na branch 'main'
+      # Step 8: Executa o APPLY (Roda APENAS quando o PR for aprovado e mergeado na branch 'main')
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_DEFAULT_REGION }}
         run: terraform apply -auto-approve -input=false
