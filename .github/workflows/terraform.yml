@@ -1,4 +1,4 @@
-name: "Terraform Infrastructure CI/CD"
+name: "Oficina IaC - Create"
 
 # 1. GATILHOS: Dispara no PR (para testar) e no Push para a main (para aplicar)
 on:
