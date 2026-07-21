@@ -1,4 +1,4 @@
-name: "Terraform Manual Destroy"
+name: "Oficina IaC - Destroy"
 
 # 1. GATILHO: Dispara APENAS manualmente pelo botão na interface do GitHub
 on:
