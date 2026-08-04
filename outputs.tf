@@ -12,9 +12,3 @@ output "eks_cluster_endpoint" {
   description = "Endpoint do Cluster EKS"
   value       = module.eks.cluster_endpoint
 }
-
-output "load_balancer_endpoint" {
-  description = "Endereço do Load Balancer da aplicação"
-  # Ajuste o caminho abaixo conforme o nome do seu recurso resource "kubernetes_service" ou "aws_lb"
-  value = kubernetes_service.app.status[0].load_balancer[0].ingress[0].hostname
-}
