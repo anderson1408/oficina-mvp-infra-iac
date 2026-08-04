@@ -1,0 +1,65 @@
+name: "Oficina IaC - Create"
+
+# 1. GATILHOS: Dispara no PR (para testar) e no Push para a main (para aplicar)
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write # Permite interagir com PRs se necessário
+
+jobs:
+  terraform:
+    name: "Terraform Pipeline"
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Baixa o código do repositório no runner do GitHub
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Injeta as credenciais temporárias do AWS Lab (VocLabs)
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+
+      # Step 3: Instala o Terraform na máquina do GitHub Actions
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      # Step 4: Inicializa o Terraform (Conecta no seu Backend S3 remoto)
+      - name: Terraform Init
+        run: terraform init
+
+      # Step 5: Verifica a formatação do código
+      - name: Terraform Format Check
+        run: terraform fmt -check
+
+      # Step 6: Valida a sintaxe dos arquivos .tf
+      - name: Terraform Validate
+        run: terraform validate
+
+      # Step 7: Executa o PLAN (Roda TANTO no PR quanto na Main para simular)
+      - name: Terraform Plan
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_DEFAULT_REGION }}
+        run: terraform plan -input=false
+
+      # Step 8: Executa o APPLY (Roda APENAS quando o PR for aprovado e mergeado na branch 'main')
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          TF_VAR_aws_region: ${{ vars.AWS_DEFAULT_REGION }}
+        run: terraform apply -auto-approve -input=false

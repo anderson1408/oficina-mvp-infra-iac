@@ -1,6 +1,7 @@
 variable "repository_name" {
   description = "Nome do repositório ECR"
   type        = string
+  default     = "oficina-mecnica-lab"
 }
 
 variable "tags" {
