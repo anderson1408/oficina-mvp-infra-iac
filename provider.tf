@@ -7,12 +7,7 @@ terraform {
     }
   }
 
-  # Armazena o estado do Terraform com segurança na nuvem da AWS
-  backend "s3" {
-    bucket = "oficina-mvp-infra-iac"
-    key    = "oficina-lab/terraform.tfstate"
-    region = "us-east-1"
-  }
+
 }
 
 provider "aws" {

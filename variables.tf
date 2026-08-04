@@ -1,9 +1,17 @@
 variable "aws_region" {
-  type    = string
-  default = "us-east-1"
+  description = "Região AWS padrão"
+  type        = string
+  default     = "us-east-1"
 }
 
 variable "project_name" {
-  type    = string
-  default = "oficina-mecnica-lab"
+  description = "Nome base do projeto"
+  type        = string
+  default     = "oficina-mecnica-lab"
+}
+
+variable "environment" {
+  description = "Ambiente de execução"
+  type        = string
+  default     = "lab"
 }
