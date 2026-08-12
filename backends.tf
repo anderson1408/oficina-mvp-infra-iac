@@ -1,7 +1,7 @@
 # ==============================================================================
 # BACKEND CONFIGURATION
 # ==============================================================================
-# Guarda o estado do Terraform (tfstate) de forma remota e segura no Amazon S3.
+# Guarda o estado do Terraform (tfstate) de forma remota e segura no Amazon S3
 # ==============================================================================
 
 terraform {
