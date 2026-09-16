@@ -9,30 +9,128 @@ O **Oficina MVP** é uma plataforma desenvolvida para automatizar e gerenciar o 
 
 A arquitetura foi projetada seguindo os princípios de **Domain-Driven Design (DDD)**, conteinerizada com **Docker**, orquestrada em **Amazon EKS (Kubernetes)** e provisionada via **Terraform** com pipelines de **GitHub Actions**.
 
+Este repositório cuida de uma parte específica dessa infraestrutura — cluster EKS e repositório ECR. Ver
+[Como este repositório se encaixa no projeto](#-4-como-este-repositório-se-encaixa-no-projeto) para o quadro
+completo com os outros dois repositórios do desafio.
+
 ---
 
 ## 🏗️ 2. Infraestrutura como Código (IaC - Terraform)
 
-### 2.1. Estrutura Modular de Pastas
-
-A infraestrutura foi organizada em módulos reutilizáveis e isolados:
+### 2.1. Estrutura de arquivos
 
 ```text
 oficina-mvp-infra-iac/
 ├── modules/
 │   ├── ecr/
-│   │   ├── main.tf        # Repositório Amazon ECR
-│   │   ├── variables.tf   # Variáveis do módulo ECR
-│   │   └── outputs.tf     # URL e ARN do repositório ECR
+│   │   ├── main.tf              # Repositório Amazon ECR
+│   │   ├── variables.tf         # Variáveis do módulo ECR
+│   │   └── outputs.tf           # URL e ARN do repositório ECR
 │   └── eks/
-│       ├── main.tf        # Cluster EKS e Managed Node Group
-│       ├── variables.tf   # Variáveis do módulo EKS
-│       └── outputs.tf     # Endpoints e Autoridade Certificadora
-├── backend.tf             # Estado remoto do Terraform no S3
-├── providers.tf           # Configuração de provedores (AWS ~> 5.0)
-├── data.tf                # Data Sources (VPC Default, Subnets e LabRole)
-├── main.tf                # Orquestração dos Módulos
-├── variables.tf           # Definição de Variáveis Globais
-├── terraform.tfvars       # Valores Padrão das Variáveis
-├── outputs.tf             # Saídas consolidadas do projeto
-└── README.md              # Documentação
+│       ├── main.tf              # Cluster EKS e Managed Node Group
+│       ├── variables.tf         # Variáveis do módulo EKS
+│       └── outputs.tf           # Endpoints e Autoridade Certificadora
+├── backends.tf                  # Estado remoto do Terraform no S3
+├── provider.tf                  # Configuração do provider (AWS ~> 5.0)
+├── data_source_vpc.tf           # Data sources: VPC default e subnets
+├── data_source_iam.tf           # Data source: LabRole (IAM)
+├── main.tf                      # Orquestração dos módulos
+├── variables.tf                 # Variáveis globais (com defaults)
+├── outputs.tf                   # Saídas consolidadas do projeto
+├── .github/workflows/
+│   ├── create_iac.yml           # Pipeline de fmt/validate → plan → apply
+│   └── destroy_iac.yml          # Pipeline manual de destroy
+└── readme.md                    # Este arquivo
+```
+
+### 2.2. O que é provisionado
+
+| Recurso | Módulo               | Detalhe                                                                 |
+|---------|----------------------|--------------------------------------------------------------------------|
+| ECR     | `modules/ecr`        | Repositório `oficina-mecnica-lab`, `scan_on_push` ativado, `force_delete = true` |
+| EKS     | `modules/eks`        | Cluster `oficina-mecnica-lab-cluster` + managed node group (`t3.medium`, tamanho desejado 2, máximo 3) |
+
+Usa a **VPC default** da conta e a role `LabRole` (fornecida pelo ambiente de laboratório) — não cria nenhuma IAM
+role própria.
+
+### 2.3. Ambiente: AWS Academy / Vocareum Learner Lab
+
+Este Terraform foi escrito para rodar numa conta de **laboratório de aprendizado (AWS Academy Learner Lab)**, não
+numa conta AWS convencional. Isso molda várias decisões do código:
+
+- As credenciais são **temporárias** (access key + secret key + **session token**) e expiram em poucas horas —
+  precisam ser atualizadas manualmente nos secrets do GitHub (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `AWS_SESSION_TOKEN`) sempre que a sessão do lab é renovada.
+- Não é possível criar roles/policies IAM próprias — cluster e node group reutilizam a `LabRole` já existente na
+  conta (`data_source_iam.tf`), em vez de uma role dedicada com o princípio de menor privilégio.
+- Usa a VPC default da conta (`data_source_vpc.tf`), filtrando as subnets para excluir a zona `us-east-1e`
+  (incompatível com os tipos de instância usados pelo node group nesse ambiente).
+- `force_delete = true` no ECR existe para facilitar destruir/recriar o ambiente repetidamente durante o
+  desenvolvimento — não é uma configuração recomendada para produção.
+
+### 2.4. State remoto
+
+O state fica no S3 (`backends.tf`): bucket `oficina-mvp-infra-iac`, key `oficina-lab/terraform.tfstate`,
+`encrypt = true`.
+
+⚠️ **Não há tabela DynamoDB de lock configurada.** Sem lock, duas execuções simultâneas (por exemplo, um `apply`
+manual e um disparo do pipeline ao mesmo tempo) podem corromper o state — evitar rodar em paralelo até isso ser
+adicionado.
+
+### 2.5. Variáveis
+
+| Variável       | Default               | Descrição                                              |
+|-----------------|------------------------|-----------------------------------------------------------|
+| `aws_region`    | `us-east-1`            | Região AWS onde tudo é provisionado                        |
+| `project_name`  | `oficina-mecnica-lab`  | Nome base usado no ECR e no cluster (`<project_name>-cluster`) |
+| `environment`   | `lab`                  | Ambiente, usado só como tag (`common_tags`)                |
+
+Não há arquivo `terraform.tfvars` — os valores acima são os defaults declarados direto em `variables.tf`; para
+sobrescrever, passar `-var` na linha de comando ou criar um `terraform.tfvars` local (ignorado pelo Git).
+
+### 2.6. Outputs
+
+| Output                 | Descrição                       |
+|--------------------------|-------------------------------------|
+| `ecr_repository_url`    | URL do repositório ECR              |
+| `eks_cluster_name`      | Nome do cluster EKS                 |
+| `eks_cluster_endpoint`  | Endpoint da API do cluster EKS      |
+
+## ⚙️ 3. CI/CD (GitHub Actions)
+
+Dois workflows, ambos exigindo os secrets `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` e a
+variável `AWS_DEFAULT_REGION` configurados no repositório:
+
+- **`create_iac.yml`** — três jobs em cadeia: `fmt-validate` (`terraform fmt -check` + `terraform validate`) →
+  `plan` → `apply` (este último só roda se o `ref` for `refs/heads/main`).
+  ⚠️ Os gatilhos de `pull_request`/`push` estão configurados para a branch `main-disabled`, não `main` — na
+  prática, hoje esse workflow só roda via **execução manual** (`workflow_dispatch`). Se isso for intencional
+  (evitar `apply` automático consumindo hora de lab sem querer), tudo certo; caso contrário, trocar
+  `main-disabled` por `main` nos gatilhos para reativar o plano automático em PR/push.
+- **`destroy_iac.yml`** — só dispara manualmente (`workflow_dispatch`), roda `terraform destroy -auto-approve`.
+
+## 🧩 4. Como este repositório se encaixa no projeto
+
+Este é o repositório de infraestrutura (EKS + ECR) do desafio, referenciado pelos outros dois:
+
+- [`oficina-mvp-java`](https://github.com/lukebria/oficina-mvp-java) — backend Spring Boot. O
+  `.github/workflows/app-deploy.yml` de lá assume que o cluster (`oficina-mecnica-lab-cluster`) e o repositório
+  ECR (`oficina-mecnica-lab`) provisionados aqui já existem, e aplica os manifests em `k8s/` sobre eles —
+  incluindo o Postgres, que hoje roda como um `Deployment` comum dentro do mesmo cluster (`k8s/banco.yaml`), e
+  **não** é um banco gerenciado provisionado por este Terraform.
+- [`oficina-auth-function`](https://github.com/lukebria/oficina-auth-function) — Function serverless (Lambda) que
+  valida CPF/CNPJ e emite o JWT do fluxo público de cliente. Não depende de nada provisionado aqui — tem seu
+  próprio Terraform (Lambda + API Gateway) dentro do próprio repositório.
+
+O plano de organização final do projeto prevê 4 repositórios de infra/app separados (Lambda, infra Kubernetes,
+infra de banco gerenciado e a aplicação principal) — ver a seção "Roadmap / TODO" do README do
+`oficina-mvp-java` para o detalhe completo. Hoje: este repositório cobre a infra do Kubernetes/ECR; a infra de
+banco gerenciado ainda não existe em lugar nenhum.
+
+## 🖼️ 5. Diagrama
+
+![Arquitetura](oficina%20mvp-2.png)
+
+> O diagrama mostra "Terraform Cloud" como backend do state — o backend real hoje é S3 (ver
+> [State remoto](#24-state-remoto)). O repositório `oficina-mvp-java-backend` no diagrama corresponde ao
+> repositório atual `oficina-mvp-java`, e a function `oficina-auth-function` ainda não está representada aqui.
